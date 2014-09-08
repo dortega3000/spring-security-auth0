@@ -1,11 +1,11 @@
 package com.ornaapplabs.spring.security.auth0;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
 import org.springframework.web.filter.GenericFilterBean;
 
 import javax.servlet.FilterChain;
@@ -15,22 +15,30 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.regex.Pattern;
 
 /**
  * Filter responsible to intercept the JWT in the HTTP header and attempt an authentication. It delegates the authentication to the authentication manager
  *
  * @author Daniel Teixeira
  */
+@Component
 public class Auth0AuthenticationFilter extends GenericFilterBean {
 
-    @Autowired
-    private AuthenticationManager authenticationManager;
-
+    private AuthenticationProvider authenticationProvider;
     private AuthenticationEntryPoint entryPoint;
-
-
     private Boolean validatePreFlight = true;
+
+    private static final String STR_SCHEME = "Bearer";
+    private static final String STR_ACCESS_CONTROL_REQUEST_METHOD = "Access-Control-Request-Method";
+    private static final String STR_OPTIONS = "OPTIONS";
+    private static final String STR_AUTHORIZATION_HEADER = "authorization";
+
+    public Auth0AuthenticationFilter(AuthenticationProvider authenticationProvider, AuthenticationEntryPoint entryPoint, Boolean validatePreFlight) {
+        this.authenticationProvider = authenticationProvider;
+        this.entryPoint = entryPoint;
+        this.validatePreFlight = validatePreFlight;
+    }
+
 
     public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
 
@@ -39,22 +47,17 @@ public class Auth0AuthenticationFilter extends GenericFilterBean {
 
         String jwt = getToken((HttpServletRequest) request);
 
-        Boolean isPreFlight = ((request.getHeader("Access-Control-Request-Method") != null) && (request.getMethod().equals("OPTIONS")));
+        if ((jwt != null) && ((validatePreFlight) ||
+                (!((request.getHeader(STR_ACCESS_CONTROL_REQUEST_METHOD) != null) && (request.getMethod().equals(STR_OPTIONS)))))) {
+            try {
+                Auth0JWTToken token = new Auth0JWTToken(jwt);
+                Authentication authResult = authenticationProvider.authenticate(token);
+                SecurityContextHolder.getContext().setAuthentication(authResult);
 
-
-        if ((validatePreFlight) || (!isPreFlight)) {
-            if (jwt != null) {
-                try {
-
-                    Auth0JWTToken token = new Auth0JWTToken(jwt);
-                    Authentication authResult = authenticationManager.authenticate(token);
-                    SecurityContextHolder.getContext().setAuthentication(authResult);
-
-                } catch (AuthenticationException failed) {
-                    SecurityContextHolder.clearContext();
-                    entryPoint.commence(request, response, failed);
-                    return;
-                }
+            } catch (AuthenticationException failed) {
+                SecurityContextHolder.clearContext();
+                entryPoint.commence(request, response, failed);
+                return;
             }
         }
 
@@ -67,24 +70,20 @@ public class Auth0AuthenticationFilter extends GenericFilterBean {
      */
     private String getToken(HttpServletRequest httpRequest) {
         String token = null;
-        final String authorizationHeader = httpRequest.getHeader("authorization");
+        final String authorizationHeader = httpRequest.getHeader(STR_AUTHORIZATION_HEADER);
         if (authorizationHeader == null) {
-            // "Unauthorized: No Authorization header was found"
             return null;
         }
 
         String[] parts = authorizationHeader.split(" ");
         if (parts.length != 2) {
-            // "Unauthorized: Format is Authorization: Bearer [token]"
             return null;
-
         }
 
         String scheme = parts[0];
         String credentials = parts[1];
 
-        Pattern pattern = Pattern.compile("^Bearer$", Pattern.CASE_INSENSITIVE);
-        if (pattern.matcher(scheme).matches()) {
+        if (scheme.equals(STR_SCHEME)) {
             token = credentials;
         }
         return token;
@@ -92,10 +91,6 @@ public class Auth0AuthenticationFilter extends GenericFilterBean {
 
     public AuthenticationEntryPoint getEntryPoint() {
         return entryPoint;
-    }
-
-    public void setEntryPoint(AuthenticationEntryPoint entryPoint) {
-        this.entryPoint = entryPoint;
     }
 
     public Boolean getValidatePreFlight() {

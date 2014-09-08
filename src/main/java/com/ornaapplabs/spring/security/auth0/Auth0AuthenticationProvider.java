@@ -3,10 +3,11 @@ package com.ornaapplabs.spring.security.auth0;
 import com.auth0.jwt.JWTVerifier;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.security.InvalidKeyException;
@@ -19,35 +20,30 @@ import java.util.Map;
  *
  * @author Daniel Teixeira
  */
-public class Auth0AuthenticationProvider implements AuthenticationProvider, InitializingBean {
+
+@Component
+public class Auth0AuthenticationProvider implements AuthenticationProvider {
 
     private JWTVerifier jwtVerifier = null;
     private String clientSecret = null;
     private String clientId = null;
 
+
     private final Log logger = LogFactory.getLog(getClass());
 
-    public String getClientSecret() {
-        return clientSecret;
-    }
-
-    public void setClientSecret(String clientSecret) {
+    public Auth0AuthenticationProvider(String clientSecret, String clientId) {
         this.clientSecret = clientSecret;
-    }
-
-    public String getClientId() {
-        return clientId;
-    }
-
-    public void setClientId(String clientId) {
         this.clientId = clientId;
+
     }
 
+    @Override
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
-
+        createVerifier();
         String token = ((Auth0JWTToken) authentication).getJwt();
 
         logger.info("Trying to authenticate with token: " + token);
+
 
         Map<String, Object> decoded;
         try {
@@ -77,15 +73,19 @@ public class Auth0AuthenticationProvider implements AuthenticationProvider, Init
         }
     }
 
+    private void createVerifier() {
+        if (jwtVerifier == null) {
+            if ((StringUtils.isEmpty(clientId)) || (StringUtils.isEmpty(clientId))) {
+                logger.warn("CliendId and/or ClientSecret are null or empty, token decryption will fail!!!!");
+            }
+            jwtVerifier = new JWTVerifier(clientSecret, clientId);
+        }
+    }
+
+    @Override
     public boolean supports(Class<?> authentication) {
         return Auth0JWTToken.class.isAssignableFrom(authentication);
     }
 
-    public void afterPropertiesSet() throws Exception {
-        if ((clientSecret == null) || (clientId == null)) {
-            throw new RuntimeException("client secret and client id are not set for Auth0AuthenticationProvider");
-        }
-        jwtVerifier = new JWTVerifier(clientSecret, clientId);
-    }
 
 }
